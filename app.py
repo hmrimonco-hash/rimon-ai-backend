@@ -4,8 +4,9 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-MODEL = "gemini-3.1-flash-lite"
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
+MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]
+RETRY_CODES = (429, 500, 502, 503, 504)
 
 MODULES = {
     "study": "You are a patient study tutor for a university student. Explain clearly and concisely. Reply in the same language the user writes in (Bengali, Banglish or English).",
@@ -18,18 +19,29 @@ def gemini(text, system=None):
     body = {"contents": [{"parts": [{"text": text}]}]}
     if system:
         body["system_instruction"] = {"parts": [{"text": system}]}
-    resp = requests.post(
-        URL,
-        headers={
-            "x-goog-api-key": os.environ.get("GEMINI_API_KEY", ""),
-            "Content-Type": "application/json",
-        },
-        json=body,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    parts = resp.json()["candidates"][0]["content"]["parts"]
-    return "".join(p.get("text", "") for p in parts).strip()
+    headers = {
+        "x-goog-api-key": os.environ.get("GEMINI_API_KEY", ""),
+        "Content-Type": "application/json",
+    }
+    last = "no model tried"
+    for model in MODELS:
+        try:
+            resp = requests.post(
+                f"{BASE}{model}:generateContent",
+                headers=headers,
+                json=body,
+                timeout=10,
+            )
+        except requests.RequestException as e:
+            last = f"{model}: {type(e).__name__}"
+            continue
+        if resp.status_code in RETRY_CODES:
+            last = f"{model}: HTTP {resp.status_code}"
+            continue
+        resp.raise_for_status()
+        parts = resp.json()["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in parts).strip()
+    raise RuntimeError("all models failed (" + last + ")")
 
 
 def route(message):
@@ -64,5 +76,5 @@ def chat():
         if module in NOT_BUILT:
             return jsonify(module=module, answer="This module is not built yet.")
         return jsonify(module=module, answer=gemini(message, MODULES[module]))
-    except (requests.RequestException, KeyError, IndexError) as e:
+    except (requests.RequestException, KeyError, IndexError, RuntimeError) as e:
         return jsonify(error="gemini call failed", detail=str(e)[:200]), 502
