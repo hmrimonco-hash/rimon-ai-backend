@@ -3,6 +3,7 @@ import requests
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
 MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]
@@ -15,8 +16,12 @@ MODULES = {
 NOT_BUILT = ("planner", "research")
 
 
-def gemini(text, system=None):
-    body = {"contents": [{"parts": [{"text": text}]}]}
+def gemini(text, system=None, file=None, timeout=10):
+    parts = []
+    if file:
+        parts.append({"inline_data": {"mime_type": file["mime"], "data": file["data"]}})
+    parts.append({"text": text})
+    body = {"contents": [{"parts": parts}]}
     if system:
         body["system_instruction"] = {"parts": [{"text": system}]}
     headers = {
@@ -30,7 +35,7 @@ def gemini(text, system=None):
                 f"{BASE}{model}:generateContent",
                 headers=headers,
                 json=body,
-                timeout=10,
+                timeout=timeout,
             )
         except requests.RequestException as e:
             last = f"{model}: {type(e).__name__}"
@@ -63,18 +68,38 @@ def home():
     return jsonify(status="ok", message="Rimon AI backend is running")
 
 
-@app.route("/chat")
+ALLOWED = (
+    "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif",
+    "application/pdf", "text/plain",
+)
+
+
+@app.route("/chat", methods=["GET", "POST"])
 def chat():
     token = os.environ.get("APP_TOKEN")
     if not token or request.args.get("t") != token:
         return jsonify(error="not allowed"), 403
-    message = request.args.get("q", "")
+    file = None
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        message = (data.get("q") or "").strip()
+        file = data.get("file")
+        if file:
+            if file.get("mime") not in ALLOWED or not file.get("data"):
+                return jsonify(error="this file type is not supported"), 400
+            if len(file["data"]) > 7_000_000:
+                return jsonify(error="file is too large"), 400
+            if not message:
+                message = "Summarize this file."
+    else:
+        message = request.args.get("q", "")
     if not message:
         return jsonify(error="no question"), 400
     try:
-        module = route(message)
+        module = "study" if file else route(message)
         if module in NOT_BUILT:
             return jsonify(module=module, answer="This module is not built yet.")
-        return jsonify(module=module, answer=gemini(message, MODULES[module]))
+        answer = gemini(message, MODULES[module], file, 25 if file else 10)
+        return jsonify(module=module, answer=answer)
     except (requests.RequestException, KeyError, IndexError, RuntimeError) as e:
         return jsonify(error="gemini call failed", detail=str(e)[:200]), 502

@@ -90,6 +90,9 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .cmic{background:rgba(255,255,255,.16)}
 .csend{background:linear-gradient(135deg,#3b82f6,#06b6d4);box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
 #home{padding-bottom:78px}
+.fchip{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:520px;margin:0 auto 8px;padding:8px 8px 8px 16px;border-radius:99px;font-size:13px;pointer-events:auto}
+.fchip[hidden]{display:none}
+.fchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -112,6 +115,7 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 <symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
 <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12l14-8-4 16-3-6-7-2z"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
 </defs></svg>
 <main>
 <div class="top"><div><p class="sub">Rimon AI</p><h1>Hi, Rimon</h1></div><div class="av">R</div></div>
@@ -127,7 +131,7 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 <div class="glass chat" id="chat">
 <div class="b ai"><span class="chip live">ready</span><br>Ask me anything. Study and general questions work today. Planner, mail and files are not built yet.</div>
 </div>
-<div class="comp"><div class="glass cbar"><button class="cbtn cmic" id="cmic" aria-label="Mic"><svg class="ic"><use href="#i-mic"/></svg></button><input id="cin" placeholder="Message Rimon AI" autocomplete="off"><button class="cbtn csend" id="csend" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button></div></div>
+<div class="comp"><div class="glass fchip" id="fchip" hidden></div><input type="file" id="fin" hidden accept="image/*,application/pdf,text/plain"><div class="glass cbar"><button class="cbtn cmic" id="cclip" aria-label="Attach a file"><svg class="ic"><use href="#i-clip"/></svg></button><button class="cbtn cmic" id="cmic" aria-label="Mic"><svg class="ic"><use href="#i-mic"/></svg></button><input id="cin" placeholder="Message Rimon AI" autocomplete="off"><button class="cbtn csend" id="csend" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button></div></div>
 </section>
 
 <section id="today">
@@ -256,12 +260,21 @@ inp.style.cssText="width:100%;padding:12px;border-radius:14px;border:1px solid v
 b.style.cssText="width:100%;padding:12px;border-radius:99px;border:1px solid var(--gb);color:#fff;font-weight:600;font-size:15px;font-family:inherit";
 b.onclick=function(){var v=inp.value.trim();if(!v)return;TOKEN=v;try{localStorage.setItem("rimon_token",v)}catch(e){}closeSheet();then()};
 p.appendChild(el("p","sub","Enter your app password once. It stays on this phone."));p.appendChild(inp);p.appendChild(b)}
-async function sendMsg(){var v=cin.value.trim();if(!v)return;
+var picked=null,fin=document.getElementById("fin"),fch=document.getElementById("fchip");
+function showChip(){fch.textContent="";if(!picked){fch.hidden=true;return}
+fch.hidden=false;fch.appendChild(el("span","",picked.name+" ("+Math.max(1,Math.round(picked.size/1024))+" KB)"));
+var x=el("button","pill","Remove");x.style.padding="6px 12px";x.onclick=function(){picked=null;fin.value="";showChip()};fch.appendChild(x)}
+document.getElementById("cclip").onclick=function(){fin.click()};
+fin.onchange=function(){var f=fin.files[0];if(!f)return;
+if(f.size>5*1024*1024){chat.appendChild(el("div","b ai","That file is too large. The limit is 5 MB."));toEnd();fin.value="";return}
+var rd=new FileReader();rd.onload=function(){var u=String(rd.result);picked={name:f.name,mime:f.type||"application/octet-stream",data:u.slice(u.indexOf(",")+1),size:f.size};showChip()};rd.readAsDataURL(f)};
+async function sendMsg(){var v=cin.value.trim();if(!v&&!picked)return;
 if(!TOKEN){askPass(sendMsg);return}
-cin.value="";chat.appendChild(el("div","b me",v));
+var f=picked;cin.value="";picked=null;fin.value="";showChip();
+var me=el("div","b me",v||"(file only)");if(f){var at=el("div","sub","Attached: "+f.name);at.style.marginTop="4px";me.appendChild(at)}chat.appendChild(me);
 var w=el("div","b ai","...");chat.appendChild(w);toEnd();
 var tm=setTimeout(function(){if(w.textContent==="...")w.textContent="Waking up the server, this can take a minute..."},8000);
-try{var r=await fetch("/chat?t="+encodeURIComponent(TOKEN)+"&q="+encodeURIComponent(v)),d=await r.json();
+try{var r=(f?await fetch("/chat?t="+encodeURIComponent(TOKEN),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:v,file:{mime:f.mime,data:f.data}})}):await fetch("/chat?t="+encodeURIComponent(TOKEN)+"&q="+encodeURIComponent(v))),d=await r.json();
 if(r.status===403){TOKEN="";try{localStorage.removeItem("rimon_token")}catch(e){}}
 w.textContent="";
 if(d.answer){w.appendChild(el("span","chip "+(d.module==="planner"||d.module==="research"?"soon":"live"),d.module));w.appendChild(document.createElement("br"));w.appendChild(document.createTextNode(d.answer))}
