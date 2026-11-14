@@ -1,0 +1,12 @@
+{
+  "appId": "com.rimon.ai",
+  "appName": "Rimon AI",
+  "webDir": "www",
+  "server": {
+    "url": "https://rimon-ai-backend-ylk2.onrender.com/static/app.html",
+    "cleartext": false
+  },
+  "android": {
+    "backgroundColor": "#050b1e"
+  }
+}
